@@ -65,7 +65,7 @@ const result = document.getElementById('result');
 const scoreDisplay = document.getElementById('score');
 
 const judgeLineY = window.innerHeight - 150;
-const noteFallDuration = 4.5;
+const noteFallDuration = 4.2;
 const spawnOffset = 0.32;
 const hitRangePx = 35;
 
@@ -157,9 +157,9 @@ function judgeNote(lane) {
     triggerParticle(best.el);
     best.el.remove();
     activeNotes = activeNotes.filter(n => n !== best);
-    if (minDiff <= 30) {
+    if (minDiff <= 40) {
       showJudgement("Perfect", "#FFD700"); score += 100; perfectCount++;
-    } else if (minDiff <= 50) {
+    } else if (minDiff <= 60) {
       showJudgement("Great", "#00BFFF"); score += 70; greatCount++;
     } else {
       showJudgement("Miss", "#FF4444"); missCount++;
