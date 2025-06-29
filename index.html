@@ -157,9 +157,9 @@ function judgeNote(lane) {
     triggerParticle(best.el);
     best.el.remove();
     activeNotes = activeNotes.filter(n => n !== best);
-    if (minDiff <= 30) {
+    if (minDiff <= 25) {
       showJudgement("Perfect", "#FFD700"); score += 100; perfectCount++;
-    } else if (minDiff <= 60) {
+    } else if (minDiff <= 50) {
       showJudgement("Great", "#00BFFF"); score += 70; greatCount++;
     } else {
       showJudgement("Miss", "#FF4444"); missCount++;
