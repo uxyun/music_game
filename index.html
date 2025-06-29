@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>音ゲー完全版</title>
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; user-select: none; }
+    #game { display: flex; height: 100vh; touch-action: manipulation; }
+    .lane {
+      flex: 1; border: 1px solid #333; background: #111; position: relative;
+    }
+    .note {
+      position: absolute; width: 80%; height: 20px; background: #f44;
+      border-radius: 4px; left: 10%; top: 0; transition: top 0.016s linear;
+    }
+    #judgeLine {
+      position: fixed; bottom: 150px; left: 0; width: 100%;
+      height: 4px; background: lime; pointer-events: none; z-index: 100;
+    }
+    #startButton {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      padding: 10px 20px; font-size: 18px; background: #28f; color: white;
+      border: none; border-radius: 6px; cursor: pointer; z-index: 300;
+    }
+    #score, #judgement, #message {
+      position: fixed; left: 50%; transform: translateX(-50%); z-index: 200;
+      font-size: 24px; font-weight: bold; color: white;
+      text-shadow: 2px 2px 4px black;
+    }
+    #score { top: 60px; }
+    #judgement { bottom: 200px; font-size: 32px; }
+    #message { top: 100px; color: yellow; }
+    #result {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.9); color: white; display: none;
+      flex-direction: column; justify-content: center; align-items: center;
+      font-size: 24px; z-index: 999;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game">
+  <div class="lane" data-lane="0"></div>
+  <div class="lane" data-lane="1"></div>
+  <div class="lane" data-lane="2"></div>
+  <div class="lane" data-lane="3"></div>
+</div>
+<div id="judgeLine"></div>
+<button id="startButton" disabled>START</button>
+<div id="score">Score: 0</div>
+<div id="judgement"></div>
+<div id="message">譜面データ読み込み中...</div>
+<div id="result"></div>
+<audio id="audio" src="music.m4a" preload="auto"></audio>
+
+<script>
+const audio = document.getElementById('audio');
+const lanes = document.querySelectorAll('.lane');
+const startBtn = document.getElementById('startButton');
+const message = document.getElementById('message');
+const judgement = document.getElementById('judgement');
+const result = document.getElementById('result');
+const scoreDisplay = document.getElementById('score');
+
+const judgeLineY = window.innerHeight - 150;
+const noteFallDuration = 4.5;
+const spawnOffset = 0.32;
+const hitRangePx = 35;
+
+let notes = [], activeNotes = [], score = 0;
+let perfectCount = 0, greatCount = 0, missCount = 0;
+
+fetch('humen.json')
+  .then(res => res.json())
+  .then(data => {
+    notes = data.map(n => ({
+      time: n.time / 1000,
+      lane: n.lane,
+      judged: false,
+      spawned: false
+    }));
+    message.textContent = '譜面読込完了！';
+    startBtn.disabled = false;
+  })
+  .catch(err => {
+    message.textContent = '読み込み失敗: ' + err.message;
+  });
+
+startBtn.addEventListener('click', () => {
+  audio.currentTime = 0;
+  audio.play().then(() => {
+    score = perfectCount = greatCount = missCount = 0;
+    notes.forEach(n => { n.spawned = false; n.judged = false; });
+    activeNotes = [];
+    updateScore();
+    message.textContent = '';
+    result.style.display = 'none';
+    startBtn.style.display = 'none';
+    requestAnimationFrame(gameLoop);
+  });
+});
+
+function gameLoop() {
+  const elapsed = audio.currentTime;
+  notes.forEach(note => {
+    if (!note.spawned && elapsed >= note.time - noteFallDuration + spawnOffset) {
+      spawnNote(note);
+      note.spawned = true;
+    }
+  });
+  activeNotes.forEach(noteObj => {
+    const { note, el } = noteObj;
+    const progress = Math.min(1, (elapsed - (note.time - noteFallDuration + spawnOffset)) / noteFallDuration);
+    // ここを修正。画面下＋余白まで移動させる
+    const y = progress * (window.innerHeight + 50);
+    el.style.top = y + 'px';
+
+    if (!note.judged && y > judgeLineY + hitRangePx) {
+      note.judged = true;
+      showJudgement("Miss", "#FF4444");
+      missCount++;
+      updateScore();
+    }
+
+    if (y > window.innerHeight + 50) {
+      el.remove();
+      activeNotes = activeNotes.filter(n => n !== noteObj);
+    }
+  });
+  if (!audio.paused) requestAnimationFrame(gameLoop);
+  else showResult();
+}
+
+
+function spawnNote(note) {
+  const laneDiv = lanes[note.lane];
+  const noteEl = document.createElement('div');
+  noteEl.className = 'note';
+  laneDiv.appendChild(noteEl);
+  activeNotes.push({ el: noteEl, note });
+}
+
+function judgeNote(lane) {
+  let best = null, minDiff = Infinity;
+  activeNotes.forEach(n => {
+    if (n.note.lane !== lane || n.note.judged) return;
+    const y = parseFloat(n.el.style.top);
+    const diff = Math.abs(y - judgeLineY);
+    if (diff < minDiff && diff <= hitRangePx) {
+      best = n; minDiff = diff;
+    }
+  });
+  if (best) {
+    best.note.judged = true;
+    triggerParticle(best.el);
+    best.el.remove();
+    activeNotes = activeNotes.filter(n => n !== best);
+    if (minDiff <= 30) {
+      showJudgement("Perfect", "#FFD700"); score += 100; perfectCount++;
+    } else if (minDiff <= 50) {
+      showJudgement("Great", "#00BFFF"); score += 70; greatCount++;
+    } else {
+      showJudgement("Miss", "#FF4444"); missCount++;
+    }
+    updateScore();
+  } else {
+    showJudgement("Miss", "#FF4444"); missCount++; updateScore();
+  }
+}
+
+function showJudgement(text, color) {
+  judgement.textContent = text;
+  judgement.style.color = color;
+  judgement.style.opacity = 1;
+  setTimeout(() => { judgement.style.opacity = 0; }, 500);
+}
+
+function triggerParticle(noteEl) {
+  const rect = noteEl.getBoundingClientRect();
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement('div');
+    Object.assign(p.style, {
+      position: 'fixed', width: '6px', height: '6px',
+      background: '#fff', borderRadius: '50%',
+      left: rect.left + rect.width / 2 + 'px',
+      top: rect.top + rect.height / 2 + 'px',
+      zIndex: 999
+    });
+    document.body.appendChild(p);
+    const angle = Math.random() * 2 * Math.PI, speed = Math.random() * 4 + 2;
+    let x = parseFloat(p.style.left), y = parseFloat(p.style.top), life = 20;
+    const vx = Math.cos(angle) * speed, vy = Math.sin(angle) * speed;
+    const anim = setInterval(() => {
+      x += vx; y += vy; life--;
+      p.style.left = x + 'px'; p.style.top = y + 'px'; p.style.opacity = life / 20;
+      if (life <= 0) { clearInterval(anim); p.remove(); }
+    }, 16);
+  }
+}
+
+function updateScore() {
+  scoreDisplay.textContent = `Score: ${score}`;
+}
+
+function showResult() {
+  const total = perfectCount + greatCount + missCount;
+  const accuracy = total ? ((perfectCount + greatCount * 0.7) / total * 100).toFixed(1) : '0.0';
+  result.innerHTML = `
+    <div>🎉 リザルト 🎉</div>
+    <div>スコア: ${score}</div>
+    <div>Perfect: ${perfectCount}</div>
+    <div>Great: ${greatCount}</div>
+    <div>Miss: ${missCount}</div>
+    <div>精度: ${accuracy}%</div>
+    <button onclick="location.reload()" style="margin-top:20px;padding:10px 20px;">もう一回！</button>
+  `;
+  result.style.display = 'flex';
+}
+
+document.addEventListener('keydown', e => {
+  const map = { 'a': 0, 's': 1, 'd': 2, 'f': 3 };
+  if (map.hasOwnProperty(e.key)) judgeNote(map[e.key]);
+});
+lanes.forEach(lane => {
+  lane.addEventListener('touchstart', e => {
+    e.preventDefault();
+    judgeNote(parseInt(lane.dataset.lane));
+  }, { passive: false });
+});
+</script>
+
+</body>
+</html>
